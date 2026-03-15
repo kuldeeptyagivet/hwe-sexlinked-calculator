@@ -1,6 +1,6 @@
 # 🧬 HWE at Sex-Linked Loci — Interactive Calculator
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://hwe-sexlinked-calculator.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://hwe-xlinked-calculator.streamlit.app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 
@@ -20,7 +20,7 @@ The tool addresses a gap in existing software: **no standalone calculator existe
 
 ## 🚀 Live Application
 
-👉 **[Launch the app here](https://hwe-sexlinked-calculator.streamlit.app)**
+👉 **[Launch the app here](https://hwe-xlinked-calculator.streamlit.app)**
 
 No installation required. Runs in any modern web browser.
 
@@ -73,7 +73,7 @@ To run the app locally on your machine:
 
 ```bash
 # Clone the repository
-git clone https://github.com/[your-username]/hwe-sexlinked-calculator.git
+git clone https://github.com/kuldeeptyagivet/hwe-sexlinked-calculator.git
 cd hwe-sexlinked-calculator
 
 # Install dependencies
