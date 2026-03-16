@@ -145,27 +145,32 @@ def generations_to_equilibrium(d, epsilon):
     return math.ceil(math.log2(val))
 
 
-def hwe_failure_generations(d, q_bar, nf):
+def hwe_failure_generations(qf0, qm0, nf):
     """
     Compute last generation where HWE test is expected to fail.
+    Uses correct chi-square: chi2 = nf * dH^2 / [4 * qf(t)^2 * (1-qf(t))^2]
+    where qf(t) is the current female allele frequency from the trajectory.
     Returns t_fail (last failing generation), or 0 if passes from start.
     """
-    if d == 0:
-        return 0
+    q_bar = (2 * qf0 + qm0) / 3
+    d = qf0 - qm0
 
     results = []
+    t_fail = 0
+
     for t in range(1, 20):
+        # Current female allele frequency from closed-form trajectory
+        qft = q_bar + (d / 3) * ((-0.5) ** t)
+        # Excess heterozygosity
         delta_H = (d ** 2) / 2 * (0.25 ** (t - 1))
-        denom = 2 * q_bar * (1 - q_bar)
-        if denom == 0:
+        # Correct chi-square denominator uses current qf(t), not q_bar
+        denom = 4 * (qft ** 2) * ((1 - qft) ** 2)
+        if denom < 1e-12:
             chi2 = 0
         else:
             chi2 = nf * (delta_H ** 2) / denom
-        results.append((t, chi2, chi2 > 3.841))
-
-    # Find last generation that fails
-    t_fail = 0
-    for t, chi2, fails in results:
+        fails = chi2 > 3.841
+        results.append((t, chi2, fails))
         if fails:
             t_fail = t
 
@@ -241,7 +246,7 @@ st.markdown('<div class="sub-header">Interactive calculator for allele frequency
 df, q_bar = compute_trajectory(qf0, qm0, n_gen)
 d = abs(qf0 - qm0)
 t_min = generations_to_equilibrium(d, epsilon)
-t_fail, chi2_results = hwe_failure_generations(d, q_bar, nf)
+t_fail, chi2_results = hwe_failure_generations(qf0, qm0, nf)
 
 # ── Key metrics row ────────────────────────────────────────────────────────────
 st.markdown("### Key Results")
@@ -535,17 +540,18 @@ with tab4:
         st.markdown("""
         <div class="formula-box">
         ΔH(t) = d²/2 · (1/4)^(t−1)  [Excess heterozygosity]<br>
-        χ²(t) ≈ nf · [ΔH(t)]² / [2·q̄·(1−q̄)]<br>
+        χ²(t) = nf · [ΔH(t)]² / [4 · qf(t)² · (1−qf(t))²]<br>
         Fails HWE when χ²(t) > 3.841  (p < 0.05, 1 df)
         </div>""", unsafe_allow_html=True)
 
     with col_r:
-        # Chi-square trajectory table
+        # Chi-square trajectory table — uses correct chi2 values from chi2_results
         chi2_df = pd.DataFrame([
             {
                 "Generation": t,
-                "ΔH(t)": round((d**2)/2 * (0.25**(t-1)), 6),
-                "χ²(t)": round(nf * (((d**2)/2*(0.25**(t-1)))**2) / max(1e-10, 2*q_bar*(1-q_bar)), 3),
+                "ΔH(t)": round((qf0 - qm0)**2 / 2 * (0.25**(t-1)), 6),
+                "qf(t)": round(q_bar + (d/3)*((-0.5)**t), 6),
+                "χ²(t)": round(chi2, 3),
                 "HWE test (p<0.05)": "❌ FAILS" if chi2 > 3.841 else "✅ PASSES"
             }
             for t, chi2, fails in chi2_results[:10]
@@ -563,24 +569,27 @@ with tab4:
         )
 
     st.markdown("---")
-    st.markdown("**Universal HWE failure table — last failing generation (q̄ = 0.4 assumed):**")
+    st.markdown("**Universal HWE failure table — last failing generation:**")
 
     d_rows = [0.2, 0.3, 0.5, 0.7, 0.9]
     nf_cols = [100, 500, 1000, 5000]
-    q_bar_ref = 0.4
 
+    # Use qf0=0.5+d/2, qm0=0.5-d/2 for each row (symmetric starting point)
     hwe_data = {"d = |qf₀−qm₀|": [str(v) for v in d_rows]}
     for n in nf_cols:
         col_vals = []
         for dv in d_rows:
-            t_f, _ = hwe_failure_generations(dv, q_bar_ref, n)
+            qf0_ref = 0.5 + dv/2
+            qm0_ref = 0.5 - dv/2
+            t_f, _ = hwe_failure_generations(qf0_ref, qm0_ref, n)
             col_vals.append(t_f)
         hwe_data[f"nf = {n:,}"] = col_vals
 
     hwe_table = pd.DataFrame(hwe_data)
     st.dataframe(hwe_table, use_container_width=True, hide_index=True)
-    st.caption("Values show last generation expected to fail HWE test (χ² > 3.841, p < 0.05). "
-               "0 = passes from first generation. Computed at q̄ = 0.4 (worst case for variance).")
+    st.caption("Values show last generation expected to fail HWE test (χ² > 3.841, p < 0.05, correct formula). "
+               "0 = passes from first generation. Computed with qf₀ = 0.5+d/2, qm₀ = 0.5−d/2. "
+               "Use the inputs above for exact values for your specific qf₀ and qm₀.")
 
     st.markdown(f"""
     <div class="obs-box">
