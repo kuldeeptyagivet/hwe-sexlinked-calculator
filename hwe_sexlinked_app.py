@@ -147,12 +147,38 @@ def generations_to_equilibrium(d, epsilon):
     return math.ceil(math.log2(val))
 
 
-def hwe_failure_generations(qf0, qm0, nf):
+CHI2_CRIT = 3.841459   # chi-square critical value, df=1, alpha=0.05
+SQRT_CRIT = math.sqrt(CHI2_CRIT)   # = 1.959964, the two-sided 5% normal critical value
+
+
+def norm_cdf(x):
+    """Standard normal CDF, exact via the error function (no scipy dependency)."""
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def noncentral_chi2_power(lam, crit=CHI2_CRIT):
     """
-    Compute last generation where HWE test is expected to fail.
+    Exact power of the 1-df chi-square test at noncentrality lam.
+    A noncentral chi-square with 1 df and noncentrality lam is distributed as Z^2
+    for Z ~ Normal(sqrt(lam), 1), so this is exact (not an approximation) for df=1,
+    which is exactly the case here (a single sex-linked locus, 1 df HWE test).
+    """
+    if lam <= 0:
+        return 0.05  # falls back to the type-I error rate as lam -> 0
+    sqrt_lam = math.sqrt(lam)
+    return norm_cdf(sqrt_lam - SQRT_CRIT) + norm_cdf(-sqrt_lam - SQRT_CRIT)
+
+
+def hwe_failure_generations(qf0, qm0, nf, power_threshold=0.5):
+    """
+    Compute last generation meeting the given power threshold for HWE test detection.
     Uses correct chi-square: chi2 = nf * dH^2 / [4 * qf(t)^2 * (1-qf(t))^2]
-    where qf(t) is the current female allele frequency from the trajectory.
-    Returns t_fail (last failing generation), or 0 if passes from start.
+    where qf(t) is the current female allele frequency from the trajectory, treated
+    as the noncentrality parameter of a noncentral chi-square(1 df) sampling
+    distribution; power is computed exactly from that noncentrality.
+    power_threshold=0.5 (the default) is mathematically identical to the original
+    "chi2 > 3.841" criterion, since power=0.5 exactly at chi2=3.841 for df=1.
+    Returns t_fail (last generation meeting the threshold), or 0 if none does.
     """
     q_bar = (2 * qf0 + qm0) / 3
     d = qf0 - qm0
@@ -171,8 +197,9 @@ def hwe_failure_generations(qf0, qm0, nf):
             chi2 = 0
         else:
             chi2 = nf * (delta_H ** 2) / denom
-        fails = chi2 > 3.841
-        results.append((t, chi2, fails))
+        power = noncentral_chi2_power(chi2)
+        fails = power >= power_threshold
+        results.append((t, chi2, power, fails))
         if fails:
             t_fail = t
 
@@ -226,6 +253,18 @@ with st.sidebar:
         help="Number of female individuals in genomic dataset. No upper limit, so any sample size can be entered, including large-herd cattle datasets."
     )
 
+    power_threshold_label = st.select_slider(
+        "Power threshold for \"last failing generation\"",
+        options=["50%", "80%", "90%"],
+        value="50%",
+        help="χ²(t) from Equation (24) is treated as the noncentrality parameter of a "
+             "noncentral chi-square(1 df) sampling distribution. \"Last failing generation\" "
+             "is the last generation whose exact power to detect the HWE deviation meets or "
+             "exceeds this threshold. 50% is mathematically identical to the original "
+             "χ²(t) > 3.841 criterion (power = 50% exactly at that threshold)."
+    )
+    power_threshold = {"50%": 0.5, "80%": 0.8, "90%": 0.9}[power_threshold_label]
+
     st.markdown("---")
     st.markdown("**About**")
     st.markdown("""
@@ -248,7 +287,7 @@ st.markdown('<div class="sub-header">Interactive calculator for allele frequency
 df, q_bar = compute_trajectory(qf0, qm0, n_gen)
 d = abs(qf0 - qm0)
 t_min = generations_to_equilibrium(d, epsilon)
-t_fail, chi2_results = hwe_failure_generations(qf0, qm0, nf)
+t_fail, chi2_results = hwe_failure_generations(qf0, qm0, nf, power_threshold=power_threshold)
 
 # ── Key metrics row ────────────────────────────────────────────────────────────
 st.markdown("### Key Results")
@@ -280,7 +319,7 @@ with col4:
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-value">{t_fail}</div>
-        <div class="metric-label">Last generation HWE fails<br>nf = {nf:,} females</div>
+        <div class="metric-label">Last generation ≥{power_threshold_label} power<br>nf = {nf:,} females</div>
     </div>""", unsafe_allow_html=True)
 
 with col5:
@@ -524,7 +563,11 @@ with tab4:
     st.markdown("""
     Sex-linked SNPs in crossbred populations are expected to fail HWE testing for a
     predictable number of generations due to allele frequency disequilibrium between sexes —
-    **not** because of genotyping error. This tab quantifies that expectation.
+    **not** because of genotyping error. χ²(t) from Equation (24) is the *expected*
+    chi-square computed from the population-level allele frequency trajectory, not from a
+    single observed sample — it is therefore the noncentrality parameter of the sampling
+    distribution actually realized by a sample of size nf, and the exact power to detect the
+    deviation is computed from it below (not merely a χ² > 3.841 threshold check).
     """)
 
     col_l, col_r = st.columns([1, 1])
@@ -533,38 +576,41 @@ with tab4:
         st.markdown(f"""
         <div class="result-box">
         <strong>For your parameters (nf = {nf:,} females):</strong><br>
-        d = {d:.4f}, q̄ = {q_bar:.4f}<br><br>
-        Expected HWE test failures: <strong>generations 1 through {t_fail}</strong><br>
-        {"✅ Passes HWE from generation 1 onward" if t_fail == 0 else
-         f"⚠️ SNP expected to fail HWE test for {t_fail} generation(s) post-cross"}
+        d = {d:.4f}, q̄ = {q_bar:.4f}, power threshold = {power_threshold_label}<br><br>
+        Last generation meeting the power threshold: <strong>generation {t_fail}</strong><br>
+        {"✅ Never reaches this power threshold — treat any HWE deviation as unlikely to be biological in origin at this sample size" if t_fail == 0 else
+         f"⚠️ Power ≥ {power_threshold_label} to detect the deviation through generation {t_fail}"}
         <br><br>
         <em>Recommendation: Do not flag this sex-linked SNP as a genotyping error
-        in generations 1–{t_fail}. Investigate HWE failure only from generation
-        {t_fail+1} onward.</em>
+        in generation{"s" if t_fail > 1 else ""} 1{f"–{t_fail}" if t_fail > 1 else ""}.
+        Investigate HWE failure only from generation {t_fail+1} onward.</em>
         </div>""", unsafe_allow_html=True)
 
         st.markdown("""
         <div class="formula-box">
         ΔH(t) = d²/2 · (1/4)^(t−1)  [Excess heterozygosity]<br>
-        χ²(t) = nf · [ΔH(t)]² / [4 · qf(t)² · (1−qf(t))²]<br>
-        Fails HWE when χ²(t) > 3.841  (p < 0.05, 1 df)
+        χ²(t) = λ(t) = nf · [ΔH(t)]² / [4 · qf(t)² · (1−qf(t))²]<br>
+        Power(t) = Φ(√λ(t) − 1.960) + Φ(−√λ(t) − 1.960)<br>
+        (exact for a noncentral χ², 1 df; Φ = standard normal CDF)<br>
+        Power(t) = 50% exactly when χ²(t) = 3.841
         </div>""", unsafe_allow_html=True)
 
     with col_r:
-        # Chi-square trajectory table — uses correct chi2 values from chi2_results
+        # Chi-square + exact power trajectory table
         chi2_df = pd.DataFrame([
             {
                 "Generation": t,
                 "ΔH(t)": round((qf0 - qm0)**2 / 2 * (0.25**(t-1)), 6),
                 "qf(t)": round(q_bar + (d/3)*((-0.5)**t), 6),
                 "χ²(t)": round(chi2, 3),
-                "HWE test (p<0.05)": "❌ FAILS" if chi2 > 3.841 else "✅ PASSES"
+                "Power(t)": f"{power*100:.1f}%",
+                f"≥{power_threshold_label} power?": "❌ YES (flag as expected)" if fails else "✅ NO (investigate if seen)"
             }
-            for t, chi2, fails in chi2_results[:10]
+            for t, chi2, power, fails in chi2_results[:10]
         ])
 
         def color_hwe(row):
-            if "FAILS" in str(row["HWE test (p<0.05)"]):
+            if "YES" in str(row.iloc[-1]):
                 return ["background-color: #ffebee"] * len(row)
             return ["background-color: #e8f5e9"] * len(row)
 
@@ -574,8 +620,10 @@ with tab4:
             hide_index=True
         )
 
-    st.markdown("---")
-    st.markdown("**Universal HWE failure table — last failing generation:**")
+    _table_match = {"50%": "matches manuscript Table 5", "80%": "matches manuscript Table 6"}.get(
+        power_threshold_label, "no direct manuscript table at this threshold")
+    st.markdown(f"**Universal HWE failure table — last generation meeting {power_threshold_label} power "
+                f"({_table_match}):**")
 
     d_rows = [0.2, 0.3, 0.5, 0.7, 0.9]
     nf_cols = [100, 500, 1000, 5000]
@@ -587,22 +635,27 @@ with tab4:
         for dv in d_rows:
             qf0_ref = 0.5 + dv/2
             qm0_ref = 0.5 - dv/2
-            t_f, _ = hwe_failure_generations(qf0_ref, qm0_ref, n)
+            t_f, _ = hwe_failure_generations(qf0_ref, qm0_ref, n, power_threshold=power_threshold)
             col_vals.append(t_f)
         hwe_data[f"nf = {n:,}"] = col_vals
 
     hwe_table = pd.DataFrame(hwe_data)
     st.dataframe(hwe_table, use_container_width=True, hide_index=True)
-    st.caption("Values show last generation expected to fail HWE test (χ² > 3.841, p < 0.05, correct formula). "
-               "0 = passes from first generation. Computed with qf₀ = 0.5+d/2, qm₀ = 0.5−d/2. "
-               "Use the inputs above for exact values for your specific qf₀ and qm₀.")
+    st.caption(f"Values show the last generation with exact power ≥ {power_threshold_label} to detect the HWE "
+               "deviation (noncentral χ², 1 df, computed from Equation 24's expected χ² treated as the "
+               "noncentrality parameter). 0 = never reaches this power threshold. Computed with "
+               "qf₀ = 0.5+d/2, qm₀ = 0.5−d/2. Use the inputs above for exact values for your specific qf₀ "
+               "and qm₀. Change the power threshold in the sidebar to reproduce the manuscript's Table 5 "
+               "(50%) or Table 6 (80%).")
 
     st.markdown(f"""
     <div class="obs-box">
-    <strong>Observation — Direction of deviation:</strong> Sex-linked loci in crossbred
-    populations ALWAYS show excess heterozygosity in females (ΔH ≥ 0). A heterozygote
+    <strong>Observation — Direction of deviation:</strong> Under random mating, sex-linked loci in
+    crossbred populations ALWAYS show excess heterozygosity in females (ΔH ≥ 0). A heterozygote
     <em>deficit</em> at a sex-linked locus cannot arise from inter-sex allele frequency
-    disequilibrium and therefore warrants investigation as a genuine genotyping artefact.
+    disequilibrium under that assumption, and therefore warrants investigation as a genotyping
+    artefact, selection against heterozygotes, or (see the paper's Section 4.5) mate choice
+    correlated with genotype at the locus.
     </div>""", unsafe_allow_html=True)
 
 
