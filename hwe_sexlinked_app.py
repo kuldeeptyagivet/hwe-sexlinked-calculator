@@ -126,6 +126,8 @@ def compute_trajectory(qf0, qm0, n_gen):
             "q̄ (Equilibrium)": round(q_bar, 6),
             "Female deviation": round(abs(qf - q_bar), 6),
             "Male deviation": round(abs(qm - q_bar), 6),
+            "Female deviation (raw)": abs(qf - q_bar),
+            "Male deviation (raw)": abs(qm - q_bar),
             "ΔH (Excess heterozygosity)": round(delta_H, 6) if delta_H is not None else None,
             "H_obs": round(H_obs, 6) if H_obs is not None else None,
             "H_exp": round(H_exp, 6) if H_exp is not None else None,
@@ -220,8 +222,8 @@ with st.sidebar:
 
     nf = st.number_input(
         "Sample size nf (number of females)",
-        min_value=50, max_value=10000, value=1000, step=50,
-        help="Number of female individuals in genomic dataset"
+        min_value=50, value=1000, step=50,
+        help="Number of female individuals in genomic dataset. No upper limit, so any sample size can be entered, including large-herd cattle datasets."
     )
 
     st.markdown("---")
@@ -345,9 +347,13 @@ with tab1:
     ax1.set_facecolor('#fafafa')
 
     # Right plot: Deviation from equilibrium (log scale)
+    # Uses unrounded deviations: the 6-decimal rounding used for the table
+    # can round a tiny deviation to exactly 0.0 at high generation counts,
+    # which semilogy cannot plot, producing an apparent (but spurious) break
+    # in one curve before the other on the log scale.
     ax2 = axes[1]
-    dev_f = df["Female deviation"].values[1:]  # skip t=0
-    dev_m = df["Male deviation"].values[1:]
+    dev_f = df["Female deviation (raw)"].values[1:]  # skip t=0
+    dev_m = df["Male deviation (raw)"].values[1:]
     gen_skip = generations[1:]
 
     ax2.semilogy(gen_skip, dev_f, 'b-o', markersize=5, linewidth=2,
