@@ -158,10 +158,13 @@ def norm_cdf(x):
 
 def noncentral_chi2_power(lam, crit=CHI2_CRIT):
     """
-    Exact power of the 1-df chi-square test at noncentrality lam.
+    Noncentral-chi-square-based power of the 1-df HWE test at noncentrality lam.
     A noncentral chi-square with 1 df and noncentrality lam is distributed as Z^2
-    for Z ~ Normal(sqrt(lam), 1), so this is exact (not an approximation) for df=1,
-    which is exactly the case here (a single sex-linked locus, 1 df HWE test).
+    for Z ~ Normal(sqrt(lam), 1); that identity itself is exact for df=1 (not an
+    approximation). But treating the finite-sample Pearson HWE statistic as
+    following this distribution under the alternative is the standard large-sample
+    approximation, so the power this function returns is asymptotic, not exact,
+    particularly at small nf or extreme allele frequencies.
     """
     if lam <= 0:
         return 0.05  # falls back to the type-I error rate as lam -> 0
@@ -259,8 +262,8 @@ with st.sidebar:
         value="50%",
         help="χ²(t) from Equation (24) is treated as the noncentrality parameter of a "
              "noncentral chi-square(1 df) sampling distribution. \"Last failing generation\" "
-             "is the last generation whose exact power to detect the HWE deviation meets or "
-             "exceeds this threshold. 50% is mathematically identical to the original "
+             "is the last generation whose noncentral-χ²-based (asymptotic) power to detect "
+             "the HWE deviation meets or exceeds this threshold. 50% is mathematically identical to the original "
              "χ²(t) > 3.841 criterion (power = 50% exactly at that threshold)."
     )
     power_threshold = {"50%": 0.5, "80%": 0.8, "90%": 0.9}[power_threshold_label]
@@ -566,8 +569,9 @@ with tab4:
     **not** because of genotyping error. χ²(t) from Equation (24) is the *expected*
     chi-square computed from the population-level allele frequency trajectory, not from a
     single observed sample — it is therefore the noncentrality parameter of the sampling
-    distribution actually realized by a sample of size nf, and the exact power to detect the
-    deviation is computed from it below (not merely a χ² > 3.841 threshold check).
+    distribution actually realized by a sample of size nf, and the noncentral-χ²-based
+    (asymptotic) power to detect the deviation is computed from it below (not merely a
+    χ² > 3.841 threshold check).
     """)
 
     col_l, col_r = st.columns([1, 1])
@@ -591,12 +595,13 @@ with tab4:
         ΔH(t) = d²/2 · (1/4)^(t−1)  [Excess heterozygosity]<br>
         χ²(t) = λ(t) = nf · [ΔH(t)]² / [4 · qf(t)² · (1−qf(t))²]<br>
         Power(t) = Φ(√λ(t) − 1.960) + Φ(−√λ(t) − 1.960)<br>
-        (exact for a noncentral χ², 1 df; Φ = standard normal CDF)<br>
-        Power(t) = 50% exactly when χ²(t) = 3.841
+        (an exact identity for a noncentral χ², 1 df, treated as an asymptotic approximation<br>
+        for the finite-sample Pearson HWE test; Φ = standard normal CDF)<br>
+        Power(t) ≈ 50% when χ²(t) = 3.841
         </div>""", unsafe_allow_html=True)
 
     with col_r:
-        # Chi-square + exact power trajectory table
+        # Chi-square + noncentral-chi2-based power trajectory table
         chi2_df = pd.DataFrame([
             {
                 "Generation": t,
@@ -641,9 +646,9 @@ with tab4:
 
     hwe_table = pd.DataFrame(hwe_data)
     st.dataframe(hwe_table, use_container_width=True, hide_index=True)
-    st.caption(f"Values show the last generation with exact power ≥ {power_threshold_label} to detect the HWE "
-               "deviation (noncentral χ², 1 df, computed from Equation 24's expected χ² treated as the "
-               "noncentrality parameter). 0 = never reaches this power threshold. Computed with "
+    st.caption(f"Values show the last generation with noncentral-χ²-based power ≥ {power_threshold_label} to "
+               "detect the HWE deviation (asymptotic, 1 df, computed from Equation 24's expected χ² treated "
+               "as the noncentrality parameter). 0 = never reaches this power threshold. Computed with "
                "qf₀ = 0.5+d/2, qm₀ = 0.5−d/2. Use the inputs above for exact values for your specific qf₀ "
                "and qm₀. Change the power threshold in the sidebar to reproduce the manuscript's Table 5 "
                "(50%) or Table 6 (80%).")
